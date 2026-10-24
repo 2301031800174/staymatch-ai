@@ -10,7 +10,7 @@ import Navbar from "../../components/layout/Navbar";
 import Hero from "../../components/home/Hero";
 import Features from "../../components/home/Features";
 import FeaturedPG from "../../components/home/FeaturedPG";
-import Testimonials from "../../components/home/Testimonials";
+// import Testimonials from "../../components/home/Testimonials";
 import Footer from "../../components/layout/Footer";
 
 function Home() {
@@ -20,7 +20,7 @@ function Home() {
       <Hero />
       <Features />
       <FeaturedPG />
-      <Testimonials />
+      {/* <Testimonials /> */}
       <Footer />
     </>
   );

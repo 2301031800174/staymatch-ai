@@ -1,10 +1,5 @@
-// src/routes/AppRoutes.jsx
-// This file defines every URL (route) in our application
-// and which page component should be shown for each URL.
-
 import { Routes, Route } from "react-router-dom";
 
-// Importing all page components
 import Home from "../pages/Home/Home";
 import Login from "../pages/Login/Login";
 import Signup from "../pages/Signup/Signup";
@@ -17,39 +12,40 @@ import Saved from "../pages/Saved/Saved";
 import Compatibility from "../pages/Compatibility/Compatibility";
 import ExpenseCalculator from "../pages/ExpenseCalculator/ExpenseCalculator";
 import Profile from "../pages/Profile/Profile";
-
-// New: AI PG Description Generator page
 import AIDescription from "../pages/AIDescription/AIDescription";
+
+import ProtectedRoute from "../components/auth/ProtectedRoute";
 
 function AppRoutes() {
   return (
     <Routes>
-      {/* Public pages - anyone can visit these */}
+      {/* Public routes */}
       <Route path="/" element={<Home />} />
       <Route path="/login" element={<Login />} />
       <Route path="/signup" element={<Signup />} />
-
-      {/* PG browsing pages */}
       <Route path="/browse" element={<BrowsePG />} />
       <Route path="/pg/:id" element={<PGDetails />} />
 
-      {/* Dashboard pages */}
-      <Route path="/student" element={<StudentDashboard />} />
-      <Route path="/owner" element={<OwnerDashboard />} />
+      {/* Student-only routes */}
+      <Route element={<ProtectedRoute allowedRoles={["student"]} />}>
+        <Route path="/student" element={<StudentDashboard />} />
+        <Route path="/saved" element={<Saved />} />
+        <Route path="/compatibility" element={<Compatibility />} />
+        <Route path="/expenses" element={<ExpenseCalculator />} />
+      </Route>
 
-      {/* PG management */}
-      <Route path="/add-pg" element={<AddPG />} />
+      {/* Owner-only routes */}
+      <Route element={<ProtectedRoute allowedRoles={["owner"]} />}>
+        <Route path="/owner" element={<OwnerDashboard />} />
+        <Route path="/add-pg" element={<AddPG />} />
+        <Route path="/edit-pg/:id" element={<AddPG />} />
+        <Route path="/ai-description" element={<AIDescription />} />
+      </Route>
 
-      {/* Student features */}
-      <Route path="/saved" element={<Saved />} />
-      <Route path="/compatibility" element={<Compatibility />} />
-      <Route path="/expenses" element={<ExpenseCalculator />} />
-
-      {/* Profile */}
-      <Route path="/profile" element={<Profile />} />
-
-      {/* New: AI PG Description Generator */}
-      <Route path="/ai-description" element={<AIDescription />} />
+      {/* Any authenticated user */}
+      <Route element={<ProtectedRoute allowedRoles={["student", "owner"]} />}>
+        <Route path="/profile" element={<Profile />} />
+      </Route>
     </Routes>
   );
 }

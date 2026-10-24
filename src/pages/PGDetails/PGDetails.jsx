@@ -3,7 +3,6 @@
 import { useState, useEffect } from "react";
 import { Link, useParams } from "react-router-dom";
 
-// Icons used throughout this page
 import {
   HiOutlineMapPin,
   HiStar,
@@ -17,182 +16,193 @@ import {
   HiOutlineCheckCircle,
   HiOutlineUser,
   HiOutlineMap,
+  HiOutlinePhone,
 } from "react-icons/hi2";
 
-// This is the localStorage key we use to store saved PGs.
-// Keeping it as one constant means we never risk typing it
-// differently in two places.
+// Backend endpoint that returns all PGs
+const API_URL = "http://localhost:5000/api/pgs";
+
+// localStorage key shared with the Saved page
 const SAVED_PGS_KEY = "staymatch_saved_pgs";
 
+// Shown when a PG has no image (or the image fails to load)
+const DEFAULT_IMAGE =
+  "https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?w=1200&q=80";
+
+// Static house rules (not stored in the database)
+const HOUSE_RULES = [
+  "Maintain cleanliness",
+  "No smoking inside rooms",
+  "Respect quiet hours",
+  "Visitors allowed during permitted hours",
+];
+
+// ---------- Helper: format rent in Indian currency ----------
+// Example: 7500 -> "₹7,500/month"
+const formatRent = (rent) => {
+  const amount = Number(rent);
+  if (Number.isNaN(amount)) return String(rent);
+  return `₹${amount.toLocaleString("en-IN")}/month`;
+};
+
+// ---------- Helper: pick an icon for an amenity name ----------
+// Amenities come from MongoDB as text, so we match by keyword.
+const getAmenityIcon = (name) => {
+  const text = String(name).toLowerCase();
+  if (text.includes("wifi") || text.includes("internet")) return <HiOutlineWifi />;
+  if (text.includes("food") || text.includes("meal") || text.includes("mess"))
+    return <HiOutlineCake />;
+  if (text.includes("laundry")) return <HiOutlineSparkles />;
+  if (text.includes("security") || text.includes("cctv"))
+    return <HiOutlineShieldCheck />;
+  if (text.includes("study")) return <HiOutlineBookOpen />;
+  if (text.includes("housekeeping") || text.includes("clean"))
+    return <HiOutlineTrash />;
+  return <HiOutlineCheckCircle />;
+};
+
+// ---------- Helper: safely read saved PGs from localStorage ----------
+const getSavedPGs = () => {
+  try {
+    const stored = localStorage.getItem(SAVED_PGS_KEY);
+    if (!stored) return [];
+    const parsed = JSON.parse(stored);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    return [];
+  }
+};
+
 function PGDetails() {
-  // Reading the "id" value from the URL
+  // The MongoDB _id from the URL, e.g. /pg/6ad3689f761663b6828a63e5
   const { id } = useParams();
 
-  // Local array storing all six PGs (same data used in BrowsePG.jsx)
-  const pgListings = [
-    {
-      id: 1,
-      name: "Sunrise Student PG",
-      location: "Ahmedabad",
-      rent: "₹7,500/month",
-      rating: 4.5,
-      sharing: "2 Sharing",
-      image:
-        "https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?w=1200&q=80",
-      description:
-        "Comfortable and student-friendly accommodation with essential facilities for everyday living. This PG is suitable for students looking for a convenient and affordable place to stay in Ahmedabad.",
-    },
-    {
-      id: 2,
-      name: "Student Nest",
-      location: "Ahmedabad",
-      rent: "₹8,000/month",
-      rating: 4.3,
-      sharing: "3 Sharing",
-      image:
-        "https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?w=1200&q=80",
-      description:
-        "Comfortable and student-friendly accommodation with essential facilities for everyday living. This PG is suitable for students looking for a convenient and affordable place to stay in Ahmedabad.",
-    },
-    {
-      id: 3,
-      name: "Green Homes PG",
-      location: "Ahmedabad",
-      rent: "₹6,500/month",
-      rating: 4.6,
-      sharing: "2 Sharing",
-      image:
-        "https://images.unsplash.com/photo-1505691938895-1758d7feb511?w=1200&q=80",
-      description:
-        "Comfortable and student-friendly accommodation with essential facilities for everyday living. This PG is suitable for students looking for a convenient and affordable place to stay in Ahmedabad.",
-    },
-    {
-      id: 4,
-      name: "Campus View PG",
-      location: "Ahmedabad",
-      rent: "₹7,000/month",
-      rating: 4.4,
-      sharing: "2 Sharing",
-      image:
-        "https://images.unsplash.com/photo-1493809842364-78817add7ffb?w=1200&q=80",
-      description:
-        "Comfortable and student-friendly accommodation with essential facilities for everyday living. This PG is suitable for students looking for a convenient and affordable place to stay in Ahmedabad.",
-    },
-    {
-      id: 5,
-      name: "Scholar Stay",
-      location: "Ahmedabad",
-      rent: "₹8,500/month",
-      rating: 4.7,
-      sharing: "3 Sharing",
-      image:
-        "https://images.unsplash.com/photo-1484154218962-a197022b5858?w=1200&q=80",
-      description:
-        "Comfortable and student-friendly accommodation with essential facilities for everyday living. This PG is suitable for students looking for a convenient and affordable place to stay in Ahmedabad.",
-    },
-    {
-      id: 6,
-      name: "Comfort Living PG",
-      location: "Ahmedabad",
-      rent: "₹6,800/month",
-      rating: 4.2,
-      sharing: "2 Sharing",
-      image:
-        "https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?w=1200&q=80",
-      description:
-        "Comfortable and student-friendly accommodation with essential facilities for everyday living. This PG is suitable for students looking for a convenient and affordable place to stay in Ahmedabad.",
-    },
-  ];
-
-  // Finding the PG whose id matches the id from the URL
-  const pg = pgListings.find((item) => item.id === Number(id));
-
-  // ---------- Saved Listing State ----------
-  // Tracks whether THIS PG is currently saved or not
+  // ---------- State ----------
+  const [pg, setPg] = useState(null); // the PG that matches the URL id
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [isSaved, setIsSaved] = useState(false);
+  const [reloadCount, setReloadCount] = useState(0); // used by the "Try Again" button
 
-  // ---------- Helper: safely read saved PGs from localStorage ----------
-  // Wrapped in try/catch because localStorage data could be missing,
-  // empty, or corrupted (not valid JSON) - we don't want that to crash the page.
-  const getSavedPGs = () => {
-    try {
-      const stored = localStorage.getItem(SAVED_PGS_KEY);
-      if (!stored) return [];
-      const parsed = JSON.parse(stored);
-      // Make sure what we got back is actually an array before using it
-      return Array.isArray(parsed) ? parsed : [];
-    } catch (error) {
-      // If JSON.parse fails (corrupted data), just treat it as empty
-      return [];
-    }
-  };
-
-  // ---------- On page load: check if this PG is already saved ----------
-  // useEffect runs after the component renders. We use it here to read
-  // localStorage once when the page opens (or when the URL id changes).
+  // ---------- Fetch PGs and find the one matching the URL id ----------
   useEffect(() => {
-    if (!pg) return; // nothing to check if PG doesn't exist
+    let isCancelled = false; // avoids updating state after leaving the page
 
+    const fetchPG = async () => {
+      setLoading(true);
+      setError("");
+
+      try {
+        const response = await fetch(API_URL);
+        if (!response.ok) {
+          throw new Error("Server responded with an error.");
+        }
+
+        const data = await response.json();
+        const list = Array.isArray(data) ? data : [];
+        const found = list.find((item) => item._id === id);
+
+        if (!isCancelled) {
+          setPg(found || null);
+        }
+      } catch (err) {
+        if (!isCancelled) {
+          setError(
+            "Could not load PG details. Please make sure the backend is running on http://localhost:5000."
+          );
+        }
+      } finally {
+        if (!isCancelled) {
+          setLoading(false);
+        }
+      }
+    };
+
+    fetchPG();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [id, reloadCount]);
+
+  // ---------- Check whether this PG is already saved ----------
+  useEffect(() => {
+    if (!pg) {
+      setIsSaved(false);
+      return;
+    }
     const savedPGs = getSavedPGs();
-    const alreadySaved = savedPGs.some((item) => item.id === pg.id);
-    setIsSaved(alreadySaved);
-  }, [id]); // re-run this check whenever the URL id changes
+    setIsSaved(savedPGs.some((item) => item.id === pg._id));
+  }, [pg]);
 
-  // ---------- Save / Unsave handler ----------
+  // ---------- Save / Unsave ----------
   const handleSaveToggle = () => {
     if (!pg) return;
 
     const savedPGs = getSavedPGs();
 
     if (isSaved) {
-      // Currently saved -> remove it
-      const updatedList = savedPGs.filter((item) => item.id !== pg.id);
+      // Remove this PG
+      const updatedList = savedPGs.filter((item) => item.id !== pg._id);
       localStorage.setItem(SAVED_PGS_KEY, JSON.stringify(updatedList));
       setIsSaved(false);
     } else {
-      // Currently not saved -> add it (only if it's not already there,
-      // to avoid accidental duplicates)
-      const alreadyExists = savedPGs.some((item) => item.id === pg.id);
+      // Add this PG only if it isn't already there (no duplicates)
+      const alreadyExists = savedPGs.some((item) => item.id === pg._id);
 
       if (!alreadyExists) {
-        // Only storing the fields the Saved page actually needs
         const pgToSave = {
-          id: pg.id,
-          name: pg.name,
+          id: pg._id,
+          name: pg.pgName,
           location: pg.location,
-          rent: pg.rent,
-          rating: pg.rating,
+          rent: formatRent(pg.rent),
+          rating: "New", // new PGs have no rating yet
           sharing: pg.sharing,
-          description: pg.description,
+          description: pg.description || "",
         };
-
-        const updatedList = [...savedPGs, pgToSave];
-        localStorage.setItem(SAVED_PGS_KEY, JSON.stringify(updatedList));
+        localStorage.setItem(
+          SAVED_PGS_KEY,
+          JSON.stringify([...savedPGs, pgToSave])
+        );
       }
-
       setIsSaved(true);
     }
   };
 
-  // Amenities list - each has an icon and a label
-  const amenities = [
-    { icon: <HiOutlineWifi />, label: "WiFi" },
-    { icon: <HiOutlineCake />, label: "Food" },
-    { icon: <HiOutlineSparkles />, label: "Laundry" },
-    { icon: <HiOutlineShieldCheck />, label: "Security" },
-    { icon: <HiOutlineBookOpen />, label: "Study Area" },
-    { icon: <HiOutlineTrash />, label: "Housekeeping" },
-  ];
+  // ---------- Loading State ----------
+  if (loading) {
+    return (
+      <section className="bg-white py-20 px-4 text-center">
+        <p className="text-gray-600">Loading PG details...</p>
+      </section>
+    );
+  }
 
-  // House rules list - simple static text items
-  const houseRules = [
-    "Maintain cleanliness",
-    "No smoking inside rooms",
-    "Respect quiet hours",
-    "Visitors allowed during permitted hours",
-  ];
+  // ---------- Error State ----------
+  if (error) {
+    return (
+      <section className="bg-white py-20 px-4 text-center">
+        <h1 className="text-2xl font-bold text-gray-900">Something went wrong</h1>
+        <p className="mt-2 text-gray-600">{error}</p>
+        <div className="mt-6 flex flex-col sm:flex-row gap-4 justify-center">
+          <button
+            onClick={() => setReloadCount(reloadCount + 1)}
+            className="bg-blue-600 text-white px-6 py-2 rounded-lg font-medium hover:bg-blue-700 transition-colors"
+          >
+            Try Again
+          </button>
+          <Link
+            to="/browse"
+            className="inline-block text-blue-600 font-medium hover:underline py-2"
+          >
+            ← Back to Browse PGs
+          </Link>
+        </div>
+      </section>
+    );
+  }
 
-  // ---------- Handling PG Not Found ----------
+  // ---------- PG Not Found State ----------
   if (!pg) {
     return (
       <section className="bg-white py-20 px-4 text-center">
@@ -210,6 +220,19 @@ function PGDetails() {
     );
   }
 
+  // ---------- Prepare data for display ----------
+  // Amenities may be an array, or a comma-separated string - handle both
+  let amenities = [];
+  if (Array.isArray(pg.amenities)) {
+    amenities = pg.amenities;
+  } else if (typeof pg.amenities === "string" && pg.amenities.trim() !== "") {
+    amenities = pg.amenities.split(",").map((item) => item.trim());
+  }
+  amenities = amenities.filter((item) => item);
+
+  const hasContactNumber = Boolean(pg.contactNumber);
+
+  // ---------- Main Page ----------
   return (
     <section className="bg-white py-12 px-4">
       <div className="max-w-4xl mx-auto">
@@ -223,26 +246,49 @@ function PGDetails() {
         </Link>
 
         {/* ---------- Large PG Image ---------- */}
-        <div className="mt-6 rounded-xl overflow-hidden h-64 md:h-96">
-          <img
-            src={pg.image}
-            alt={pg.name}
-            className="w-full h-full object-cover"
-          />
-        </div>
+        {/* ---------- Large PG Image ---------- */}
+<div className="group relative mt-6 h-72 overflow-hidden rounded-2xl bg-gray-100 shadow-sm sm:h-80 md:h-[420px]">
+  <img
+    src={pg.image || DEFAULT_IMAGE}
+    alt={`${pg.pgName} accommodation`}
+    onError={(e) => {
+      e.currentTarget.onerror = null;
+      e.currentTarget.src = DEFAULT_IMAGE;
+    }}
+    className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.02]"
+  />
 
+  {/* Image overlay */}
+  <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent pointer-events-none" />
+
+  {/* Property label */}
+  <div className="absolute bottom-5 left-5 right-5">
+    <span className="inline-flex items-center rounded-full bg-white/95 px-3 py-1 text-xs font-semibold text-blue-700 shadow-sm">
+      Student Accommodation
+    </span>
+
+    <h2 className="mt-3 text-xl font-semibold text-white drop-shadow-md sm:text-2xl">
+      {pg.pgName}
+    </h2>
+
+    <p className="mt-1 flex items-center gap-1 text-sm text-white/90">
+      <HiOutlineMapPin />
+      {pg.location}
+    </p>
+  </div>
+</div>
         {/* ---------- Main Info Card ---------- */}
-        <div className="mt-8 border border-gray-200 rounded-xl p-6 md:p-8">
-
+        <div className="mt-8 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6 md:p-8">
           {/* Name and Rating */}
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
             <h1 className="text-2xl md:text-3xl font-bold text-gray-900">
-              {pg.name}
+              {pg.pgName}
             </h1>
 
+            {/* New PGs have no rating, so we show "New" */}
             <div className="flex items-center text-gray-700">
               <HiStar className="text-yellow-400 mr-1" />
-              {pg.rating}
+              New
             </div>
           </div>
 
@@ -255,7 +301,7 @@ function PGDetails() {
           {/* Rent and Sharing Type */}
           <div className="mt-4 flex flex-wrap items-center gap-4">
             <span className="text-blue-600 text-2xl font-bold">
-              {pg.rent}
+              {formatRent(pg.rent)}
             </span>
 
             <div className="flex items-center text-gray-600 text-sm border border-gray-200 rounded-lg px-3 py-1">
@@ -270,29 +316,33 @@ function PGDetails() {
               About this PG
             </h2>
             <p className="mt-2 text-gray-600 leading-relaxed">
-              {pg.description}
+              {pg.description || "No description has been added for this PG yet."}
             </p>
           </div>
 
           {/* ---------- Amenities Section ---------- */}
           <div className="mt-8">
-            <h2 className="text-lg font-semibold text-gray-900">
-              Amenities
-            </h2>
+            <h2 className="text-lg font-semibold text-gray-900">Amenities</h2>
 
-            <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-4">
-              {amenities.map((amenity, index) => (
-                <div
-                  key={index}
-                  className="flex items-center gap-2 border border-gray-200 rounded-lg px-3 py-2 text-gray-700 text-sm"
-                >
-                  <span className="text-blue-600 text-lg">
-                    {amenity.icon}
-                  </span>
-                  {amenity.label}
-                </div>
-              ))}
-            </div>
+            {amenities.length > 0 ? (
+              <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 gap-4">
+                {amenities.map((amenity, index) => (
+                  <div
+                    key={index}
+                    className="flex items-center gap-2 border border-gray-200 rounded-lg px-3 py-2 text-gray-700 text-sm"
+                  >
+                    <span className="text-blue-600 text-lg">
+                      {getAmenityIcon(amenity)}
+                    </span>
+                    {amenity}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-2 text-gray-600 text-sm">
+                No amenities listed for this PG.
+              </p>
+            )}
           </div>
 
           {/* ---------- Room & Sharing Section ---------- */}
@@ -304,15 +354,13 @@ function PGDetails() {
             <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4">
               <div className="border border-gray-200 rounded-lg p-4 text-center">
                 <p className="text-xs text-gray-500">Sharing Type</p>
-                <p className="mt-1 font-semibold text-gray-900">
-                  {pg.sharing}
-                </p>
+                <p className="mt-1 font-semibold text-gray-900">{pg.sharing}</p>
               </div>
 
               <div className="border border-gray-200 rounded-lg p-4 text-center">
                 <p className="text-xs text-gray-500">Monthly Rent</p>
                 <p className="mt-1 font-semibold text-gray-900">
-                  {pg.rent}
+                  {formatRent(pg.rent)}
                 </p>
               </div>
 
@@ -322,22 +370,24 @@ function PGDetails() {
               </div>
 
               <div className="border border-gray-200 rounded-lg p-4 text-center">
-                <p className="text-xs text-gray-500">Availability</p>
-                <p className="mt-1 font-semibold text-green-600 flex items-center justify-center gap-1">
-                  <HiOutlineCheckCircle />
-                  Available
-                </p>
+                <p className="text-xs text-gray-500">Verification</p>
+                {pg.isVerified ? (
+                  <p className="mt-1 font-semibold text-green-600 flex items-center justify-center gap-1">
+                    <HiOutlineCheckCircle />
+                    Verified
+                  </p>
+                ) : (
+                  <p className="mt-1 font-semibold text-gray-500">Not verified</p>
+                )}
               </div>
             </div>
           </div>
 
           {/* ---------- House Rules Section ---------- */}
           <div className="mt-8">
-            <h2 className="text-lg font-semibold text-gray-900">
-              House Rules
-            </h2>
+            <h2 className="text-lg font-semibold text-gray-900">House Rules</h2>
             <ul className="mt-4 space-y-2">
-              {houseRules.map((rule, index) => (
+              {HOUSE_RULES.map((rule, index) => (
                 <li
                   key={index}
                   className="flex items-start gap-2 text-gray-600 text-sm"
@@ -351,24 +401,22 @@ function PGDetails() {
 
           {/* ---------- Location Section ---------- */}
           <div className="mt-8">
-            <h2 className="text-lg font-semibold text-gray-900">
-              Location
-            </h2>
+            <h2 className="text-lg font-semibold text-gray-900">Location</h2>
             <p className="mt-2 text-gray-600 text-sm flex items-center gap-1">
               <HiOutlineMapPin className="text-blue-600" />
               {pg.location}
             </p>
 
+            {/* Simple visual placeholder - no real map */}
             <div className="mt-4 bg-blue-50 border border-blue-100 rounded-lg h-40 flex flex-col items-center justify-center text-blue-600">
               <HiOutlineMap className="w-10 h-10" />
               <p className="mt-2 font-medium">Map Preview</p>
-              <p className="text-sm text-blue-500">Ahmedabad, Gujarat</p>
+              <p className="text-sm text-blue-500">{pg.location}</p>
             </div>
           </div>
 
           {/* ---------- Action Buttons ---------- */}
           <div className="mt-8 flex flex-col sm:flex-row gap-4">
-            {/* Save Listing - now fully functional using localStorage */}
             <button
               onClick={handleSaveToggle}
               className={`flex-1 py-3 rounded-lg font-medium transition-colors ${
@@ -380,7 +428,6 @@ function PGDetails() {
               {isSaved ? "Saved ✓" : "Save Listing"}
             </button>
 
-            {/* Navigates to the Compatibility page (still UI-only destination) */}
             <Link
               to="/compatibility"
               className="flex-1 text-center border-2 border-blue-600 text-blue-600 py-3 rounded-lg font-medium hover:bg-blue-50 transition-colors"
@@ -389,26 +436,52 @@ function PGDetails() {
             </Link>
           </div>
 
-          {/* ---------- Contact / Owner Card ---------- */}
+          {/* ---------- Owner Card ---------- */}
           <div className="mt-10 border border-gray-200 rounded-xl p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div>
               <h3 className="font-semibold text-gray-900">
                 Need more information?
               </h3>
 
-              <div className="mt-2 flex items-center gap-2 text-gray-600 text-sm">
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-gray-600 text-sm">
                 <HiOutlineUser className="text-blue-600" />
-                PG Owner
-                <span className="flex items-center gap-1 text-green-600 text-xs font-medium ml-2">
-                  <HiOutlineCheckCircle />
-                  Verified Owner
-                </span>
+                {pg.ownerName || "PG Owner"}
+
+                {pg.isVerified ? (
+                  <span className="flex items-center gap-1 text-green-600 text-xs font-medium ml-2">
+                    <HiOutlineCheckCircle />
+                    Verified Owner
+                  </span>
+                ) : (
+                  <span className="text-gray-500 text-xs font-medium ml-2">
+                    Not verified
+                  </span>
+                )}
               </div>
+
+              {hasContactNumber && (
+                <p className="mt-1 text-gray-600 text-sm">{pg.contactNumber}</p>
+              )}
             </div>
 
-            <button className="bg-blue-600 text-white px-6 py-2 rounded-lg font-medium hover:bg-blue-700 transition-colors whitespace-nowrap">
-              Contact Owner
-            </button>
+            {/* Contact Owner: tel: link if a number exists, otherwise disabled */}
+            {hasContactNumber ? (
+              <a
+                href={`tel:${pg.contactNumber}`}
+                className="inline-flex items-center justify-center gap-2 bg-blue-600 text-white px-6 py-2 rounded-lg font-medium hover:bg-blue-700 transition-colors whitespace-nowrap"
+              >
+                <HiOutlinePhone />
+                Contact Owner
+              </a>
+            ) : (
+              <button
+                disabled
+                title="No contact number available"
+                className="bg-gray-100 text-gray-400 px-6 py-2 rounded-lg font-medium cursor-not-allowed whitespace-nowrap"
+              >
+                Contact not available
+              </button>
+            )}
           </div>
 
         </div>

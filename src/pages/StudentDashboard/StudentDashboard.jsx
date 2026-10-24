@@ -1,25 +1,14 @@
-// // Student Dashboard Page
-// // Main dashboard for logged-in students
-// // URL: /student
-// function StudentDashboard() {
-//   return (
-//     <h1>Student Dashboard Page</h1>
-//   );
-// }
-
-// export default StudentDashboard;
-
 // src/pages/StudentDashboard/StudentDashboard.jsx
 
+import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
+import Navbar from "../../components/layout/Navbar";
 
-// Icons used throughout this dashboard
 import {
   HiOutlineHome,
   HiOutlineMapPin,
-  HiStar,
-  HiOutlineBookmark,
   HiOutlineUserGroup,
+  HiOutlineBookmark,
   HiOutlineCalculator,
   HiOutlineSparkles,
   HiOutlineCurrencyRupee,
@@ -27,94 +16,175 @@ import {
   HiOutlineArrowRight,
 } from "react-icons/hi2";
 
+// Backend endpoint that returns all PG listings
+const API_URL = "http://localhost:5000/api/pgs";
+
+// Same localStorage key used by PGDetails.jsx and Saved.jsx
+const SAVED_PGS_KEY = "staymatch_saved_pgs";
+
+// Shown when a PG has no image (or the image fails to load)
+const DEFAULT_IMAGE =
+  "https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?w=600&q=80";
+
+// ---------- Helper: format rent in Indian rupees ----------
+// Example: 7500 -> "₹7,500/month"
+// Old saved entries already store rent as text, so non-numbers are returned as they are.
+const formatRent = (rent) => {
+  const amount = Number(rent);
+  if (Number.isNaN(amount)) return String(rent);
+  return `₹${amount.toLocaleString("en-IN")}/month`;
+};
+
+// ---------- Helper: safely read saved PGs from localStorage ----------
+// We only READ here - we never change or clear the stored data.
+// Supports both formats: an array of PG objects (what PGDetails saves)
+// or an array of plain ID strings.
+const readSavedEntries = () => {
+  try {
+    const stored = localStorage.getItem(SAVED_PGS_KEY);
+    if (!stored) return [];
+    const parsed = JSON.parse(stored);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    return [];
+  }
+};
+
+// Gets the PG id out of one saved entry (object or plain id)
+const getEntryId = (entry) => {
+  if (entry && typeof entry === "object") return entry.id;
+  return entry;
+};
+
+// ---------- Quick Actions ----------
+const quickActions = [
+  { label: "Browse PGs", icon: <HiOutlineHome />, to: "/browse" },
+  { label: "Find Roommate", icon: <HiOutlineUserGroup />, to: "/compatibility" },
+  { label: "Calculate Expenses", icon: <HiOutlineCalculator />, to: "/expenses" },
+  { label: "View Saved PGs", icon: <HiOutlineBookmark />, to: "/saved" },
+];
+
 function StudentDashboard() {
-  // ---------- Static Quick Stats ----------
-  // These are demo values for now, not connected to any backend
+  // ---------- State ----------
+  const [listings, setListings] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [reloadCount, setReloadCount] = useState(0); // used by "Try Again"
+
+  // Saved entries are read once when the dashboard opens
+  const [savedEntries] = useState(readSavedEntries);
+
+  // ---------- Fetch listings from the backend ----------
+  useEffect(() => {
+    let isCancelled = false; // avoids updating state after leaving the page
+
+    const fetchListings = async () => {
+      setLoading(true);
+      setError("");
+
+      try {
+        const response = await fetch(API_URL);
+        if (!response.ok) {
+          throw new Error("Server responded with an error.");
+        }
+
+        const data = await response.json();
+
+        if (!isCancelled) {
+          setListings(Array.isArray(data) ? data : []);
+        }
+      } catch (err) {
+        if (!isCancelled) {
+          setError(
+            "Could not load PG listings. Please make sure the backend is running on http://localhost:5000."
+          );
+        }
+      } finally {
+        if (!isCancelled) {
+          setLoading(false);
+        }
+      }
+    };
+
+    fetchListings();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [reloadCount]);
+
+  // ---------- Recommended PGs ----------
+  // There is no personalised matching yet, so we show the 3 newest listings.
+  const recommendedPGs = [...listings]
+    .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+    .slice(0, 3);
+
+  // ---------- Saved Listings preview ----------
+  // For each saved entry, use the real MongoDB record if we have it.
+  // If the record can't be found (e.g. backend offline), fall back to the
+  // details stored in localStorage. Plain IDs with no record are skipped.
+  const savedItems = savedEntries
+    .map((entry) => {
+      const entryId = getEntryId(entry);
+      const realPG = listings.find((pg) => pg._id === entryId);
+
+      if (realPG) {
+        return {
+          id: realPG._id,
+          name: realPG.pgName,
+          location: realPG.location,
+          rent: formatRent(realPG.rent),
+        };
+      }
+
+      if (entry && typeof entry === "object") {
+        return {
+          id: entry.id,
+          name: entry.name,
+          location: entry.location,
+          rent: formatRent(entry.rent),
+        };
+      }
+
+      return null;
+    })
+    .filter((item) => item !== null && item.id);
+
+  // The saved count comes from localStorage, so it works even if the backend is offline
+  const savedCount = savedEntries.filter((entry) => getEntryId(entry)).length;
+
+  // ---------- Quick Stats ----------
+  // Only the saved count is real. The rest are not supported yet.
   const quickStats = [
     {
       label: "Saved PGs",
-      value: "3",
+      value: String(savedCount),
       icon: <HiOutlineBookmark />,
+      available: true,
     },
     {
       label: "Compatibility Score",
-      value: "83%",
+      value: "Not calculated",
       icon: <HiOutlineUserGroup />,
+      available: false,
     },
     {
       label: "Monthly Budget",
-      value: "₹8,000",
+      value: "Not set",
       icon: <HiOutlineCurrencyRupee />,
+      available: false,
     },
     {
       label: "Roommate Matches",
-      value: "4",
+      value: "Not available yet",
       icon: <HiOutlineHeart />,
+      available: false,
     },
-  ];
-
-  // ---------- Recommended PGs ----------
-  // Static sample data, kept consistent with BrowsePG.jsx / PGDetails.jsx
-  const recommendedPGs = [
-    {
-      id: 1,
-      name: "Sunrise Student PG",
-      location: "Ahmedabad",
-      rent: "₹7,500/month",
-      rating: 4.5,
-      sharing: "2 Sharing",
-    },
-    {
-      id: 2,
-      name: "Student Nest",
-      location: "Ahmedabad",
-      rent: "₹8,000/month",
-      rating: 4.3,
-      sharing: "3 Sharing",
-    },
-    {
-      id: 3,
-      name: "Green Homes PG",
-      location: "Ahmedabad",
-      rent: "₹6,500/month",
-      rating: 4.6,
-      sharing: "2 Sharing",
-    },
-  ];
-
-  // ---------- Saved Listings (compact preview) ----------
-  // A short static list just to show on the dashboard,
-  // separate from the full Saved page which reads from localStorage
-  const savedListingsPreview = [
-    {
-      id: 1,
-      name: "Sunrise Student PG",
-      location: "Ahmedabad",
-      rent: "₹7,500/month",
-    },
-    {
-      id: 4,
-      name: "Campus View PG",
-      location: "Ahmedabad",
-      rent: "₹7,000/month",
-    },
-    {
-      id: 5,
-      name: "Scholar Stay",
-      location: "Ahmedabad",
-      rent: "₹8,500/month",
-    },
-  ];
-
-  // ---------- Quick Action Buttons ----------
-  const quickActions = [
-    { label: "Browse PGs", icon: <HiOutlineHome />, to: "/browse" },
-    { label: "Find Roommate", icon: <HiOutlineUserGroup />, to: "/compatibility" },
-    { label: "Calculate Expenses", icon: <HiOutlineCalculator />, to: "/expenses" },
-    { label: "View Saved PGs", icon: <HiOutlineBookmark />, to: "/saved" },
   ];
 
   return (
+    <>
+    <Navbar />
     <section className="bg-white py-10 px-4">
       <div className="max-w-7xl mx-auto">
 
@@ -139,22 +209,26 @@ function StudentDashboard() {
         </div>
 
         {/* ---------- Quick Stats ---------- */}
-        {/* 
-          Responsive grid:
-          - 1 column on mobile
-          - 2 columns on small screens
-          - 4 columns on large screens
-        */}
         <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          {quickStats.map((stat, index) => (
+          {quickStats.map((stat) => (
             <div
-              key={index}
+              key={stat.label}
               className="border border-gray-200 rounded-xl p-6 hover:shadow-md transition-shadow"
             >
-              <div className="w-10 h-10 flex items-center justify-center bg-blue-50 text-blue-600 rounded-lg text-xl">
+              <div
+                className={`w-10 h-10 flex items-center justify-center rounded-lg text-xl ${
+                  stat.available
+                    ? "bg-blue-50 text-blue-600"
+                    : "bg-gray-100 text-gray-400"
+                }`}
+              >
                 {stat.icon}
               </div>
-              <p className="mt-4 text-2xl font-bold text-gray-900">
+              <p
+                className={`mt-4 font-bold ${
+                  stat.available ? "text-2xl text-gray-900" : "text-lg text-gray-400"
+                }`}
+              >
                 {stat.value}
               </p>
               <p className="mt-1 text-sm text-gray-600">{stat.label}</p>
@@ -163,8 +237,6 @@ function StudentDashboard() {
         </div>
 
         {/* ---------- Main Content Grid ---------- */}
-        {/* Left column (2/3 width on desktop): Recommended PGs + Saved Listings */}
-        {/* Right column (1/3 width on desktop): Compatibility + Expenses cards */}
         <div className="mt-10 grid grid-cols-1 lg:grid-cols-3 gap-8">
 
           {/* ---------- Left Column ---------- */}
@@ -183,53 +255,94 @@ function StudentDashboard() {
                   View All
                 </Link>
               </div>
+              <p className="mt-1 text-sm text-gray-500">
+                Showing the latest PG listings.
+              </p>
 
-              <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-6">
-                {recommendedPGs.map((pg) => (
-                  <div
-                    key={pg.id}
-                    className="border border-gray-200 rounded-xl overflow-hidden hover:shadow-lg transition-all"
+              {/* Loading state */}
+              {loading && (
+                <div className="mt-4 border border-gray-200 rounded-xl p-10 text-center text-gray-600">
+                  Loading PG listings...
+                </div>
+              )}
+
+              {/* Error state */}
+              {!loading && error && (
+                <div className="mt-4 border border-red-200 bg-red-50 rounded-xl p-8 text-center">
+                  <p className="text-red-600 text-sm">{error}</p>
+                  <button
+                    onClick={() => setReloadCount(reloadCount + 1)}
+                    className="mt-4 bg-blue-600 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
                   >
-                    {/* Placeholder visual */}
-                    <div className="bg-blue-50 h-32 flex items-center justify-center">
-                      <HiOutlineHome className="text-blue-600 w-12 h-12" />
-                    </div>
+                    Try Again
+                  </button>
+                </div>
+              )}
 
-                    <div className="p-5">
-                      <h3 className="font-semibold text-gray-900">
-                        {pg.name}
-                      </h3>
+              {/* Empty state */}
+              {!loading && !error && recommendedPGs.length === 0 && (
+                <div className="mt-4 border border-gray-200 rounded-xl p-10 text-center">
+                  <HiOutlineHome className="mx-auto text-gray-300 w-12 h-12" />
+                  <p className="mt-3 text-lg font-semibold text-gray-900">
+                    No PG listings yet
+                  </p>
+                  <p className="mt-1 text-sm text-gray-600">
+                    Listings will appear here once PGs are added.
+                  </p>
+                </div>
+              )}
 
-                      <div className="mt-1 flex items-center text-gray-600 text-sm">
-                        <HiOutlineMapPin className="mr-1" />
-                        {pg.location}
+              {/* PG cards */}
+              {!loading && !error && recommendedPGs.length > 0 && (
+                <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-6">
+                  {recommendedPGs.map((pg) => (
+                    <div
+                      key={pg._id}
+                      className="border border-gray-200 rounded-xl overflow-hidden hover:shadow-lg transition-all"
+                    >
+                      {/* PG image (placeholder if missing) */}
+                      <div className="h-32 bg-gray-100">
+                        <img
+                          src={pg.image || DEFAULT_IMAGE}
+                          alt={pg.pgName}
+                          onError={(e) => {
+                            e.currentTarget.onerror = null;
+                            e.currentTarget.src = DEFAULT_IMAGE;
+                          }}
+                          className="w-full h-full object-cover"
+                        />
                       </div>
 
-                      <div className="mt-2 flex items-center justify-between">
-                        <span className="text-blue-600 font-semibold text-sm">
-                          {pg.rent}
-                        </span>
-                        <div className="flex items-center text-sm text-gray-700">
-                          <HiStar className="text-yellow-400 mr-1" />
-                          {pg.rating}
+                      <div className="p-5">
+                        <h3 className="font-semibold text-gray-900">
+                          {pg.pgName}
+                        </h3>
+
+                        <div className="mt-1 flex items-center text-gray-600 text-sm">
+                          <HiOutlineMapPin className="mr-1" />
+                          {pg.location}
                         </div>
-                      </div>
 
-                      <div className="mt-1 flex items-center text-gray-600 text-xs">
-                        <HiOutlineUserGroup className="mr-1" />
-                        {pg.sharing}
-                      </div>
+                        <div className="mt-2 text-blue-600 font-semibold text-sm">
+                          {formatRent(pg.rent)}
+                        </div>
 
-                      <Link
-                        to={`/pg/${pg.id}`}
-                        className="mt-4 block text-center bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
-                      >
-                        View Details
-                      </Link>
+                        <div className="mt-1 flex items-center text-gray-600 text-xs">
+                          <HiOutlineUserGroup className="mr-1" />
+                          {pg.sharing}
+                        </div>
+
+                        <Link
+                          to={`/pg/${pg._id}`}
+                          className="mt-4 block text-center bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+                        >
+                          View Details
+                        </Link>
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* ---------- Saved Listings ---------- */}
@@ -246,33 +359,52 @@ function StudentDashboard() {
                 </Link>
               </div>
 
-              <div className="mt-4 border border-gray-200 rounded-xl divide-y divide-gray-100">
-                {savedListingsPreview.map((pg) => (
-                  <div
-                    key={pg.id}
-                    className="flex items-center justify-between p-4"
+              {savedItems.length === 0 ? (
+                <div className="mt-4 border border-gray-200 rounded-xl p-8 text-center">
+                  <HiOutlineBookmark className="mx-auto text-gray-300 w-10 h-10" />
+                  <p className="mt-3 font-semibold text-gray-900">
+                    No saved listings yet
+                  </p>
+                  <p className="mt-1 text-sm text-gray-600">
+                    Save PGs you like and they will appear here.
+                  </p>
+                  <Link
+                    to="/browse"
+                    className="mt-4 inline-block bg-blue-600 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
                   >
-                    <div>
-                      <p className="font-medium text-gray-900 text-sm">
-                        {pg.name}
-                      </p>
-                      <div className="mt-1 flex items-center text-gray-600 text-xs">
-                        <HiOutlineMapPin className="mr-1" />
-                        {pg.location}
-                        <span className="mx-2">•</span>
-                        {pg.rent}
-                      </div>
-                    </div>
-
-                    <Link
-                      to={`/pg/${pg.id}`}
-                      className="text-blue-600 text-sm font-medium hover:underline whitespace-nowrap"
+                    Browse PGs
+                  </Link>
+                </div>
+              ) : (
+                <div className="mt-4 border border-gray-200 rounded-xl divide-y divide-gray-100">
+                  {/* Only the first 3 saved PGs are previewed here */}
+                  {savedItems.slice(0, 3).map((pg) => (
+                    <div
+                      key={pg.id}
+                      className="flex items-center justify-between p-4"
                     >
-                      View
-                    </Link>
-                  </div>
-                ))}
-              </div>
+                      <div>
+                        <p className="font-medium text-gray-900 text-sm">
+                          {pg.name}
+                        </p>
+                        <div className="mt-1 flex items-center text-gray-600 text-xs">
+                          <HiOutlineMapPin className="mr-1" />
+                          {pg.location}
+                          <span className="mx-2">•</span>
+                          {pg.rent}
+                        </div>
+                      </div>
+
+                      <Link
+                        to={`/pg/${pg.id}`}
+                        className="text-blue-600 text-sm font-medium hover:underline whitespace-nowrap"
+                      >
+                        View
+                      </Link>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
@@ -283,7 +415,7 @@ function StudentDashboard() {
             <div className="border border-blue-100 bg-blue-50 rounded-xl p-6">
               <div className="flex items-center gap-2 text-blue-600">
                 <HiOutlineSparkles className="text-xl" />
-                <span className="text-sm font-semibold">AI-Assisted</span>
+                <span className="text-sm font-semibold">Compatibility Calculator</span>
               </div>
 
               <h3 className="mt-3 text-lg font-bold text-gray-900">
@@ -292,14 +424,15 @@ function StudentDashboard() {
 
               <p className="mt-2 text-sm text-gray-600">
                 Compare lifestyle preferences such as study habits, sleep
-                schedule, cleanliness and social preferences.
+                schedule, cleanliness and social preferences using our
+                rule-based compatibility calculator.
               </p>
 
               <div className="mt-4 flex items-center justify-between bg-white border border-blue-100 rounded-lg px-4 py-3">
-                <span className="text-sm text-gray-600">
-                  Compatibility Score
+                <span className="text-sm text-gray-600">Compatibility Score</span>
+                <span className="text-sm font-semibold text-gray-400">
+                  Not calculated
                 </span>
-                <span className="text-lg font-bold text-blue-600">83%</span>
               </div>
 
               <Link
@@ -340,15 +473,13 @@ function StudentDashboard() {
               </h3>
 
               <div className="space-y-3">
-                {quickActions.map((action, index) => (
+                {quickActions.map((action) => (
                   <Link
-                    key={index}
+                    key={action.to}
                     to={action.to}
                     className="flex items-center gap-3 border border-gray-200 rounded-lg px-4 py-3 text-sm font-medium text-gray-700 hover:border-blue-400 hover:text-blue-600 transition-colors"
                   >
-                    <span className="text-blue-600 text-lg">
-                      {action.icon}
-                    </span>
+                    <span className="text-blue-600 text-lg">{action.icon}</span>
                     {action.label}
                   </Link>
                 ))}
@@ -360,6 +491,7 @@ function StudentDashboard() {
 
       </div>
     </section>
+    </>
   );
 }
 
